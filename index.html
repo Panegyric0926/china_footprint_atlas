@@ -1,0 +1,379 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>足迹地图仪表盘</title>
+  <script src="https://cdn.jsdelivr.net/npm/echarts@5.5.0/dist/echarts.min.js"></script>
+  <style>
+    body { font-family: "微软雅黑", Arial, sans-serif; margin: 0; padding: 0; background: #fafbfc;}
+    .container { max-width: 900px; margin: 32px auto; background: #fff; border-radius: 8px; box-shadow: 0 2px 8px rgba(0,0,0,0.09); padding: 16px 24px 32px 24px;}
+    h1 { text-align: center; color: #2574a9; margin-bottom: 8px;}
+    .select-row { margin: 16px 0; display: flex; flex-wrap: wrap; gap: 16px; align-items: center; justify-content: center;}
+    .select-row label { font-weight: bold; margin-right: 4px;}
+    select { font-size: 1em; padding: 2px 8px; min-width: 80px;}
+    .btn-group { display: flex; gap: 6px; margin-left: 8px;}
+    .btn { padding: 2px 10px; border-radius: 4px; border: 1px solid #bfcbd9; background: #f0f4fa; cursor: pointer; font-size: 0.97em; transition: 0.15s;}
+    .btn.selected { color: #fff; background: #2574a9; border-color: #17678e;}
+    .btn[disabled] {color:#aaa; background:#f0f0f0; border-color:#e0e0e0; cursor: not-allowed;}
+    .legend { margin: 10px 0 0 0; display: flex; gap: 16px; justify-content: center; align-items: center; flex-wrap: wrap;}
+    .legend span { display: inline-flex; align-items: center; gap: 4px;}
+    .legend-icon { display: inline-block; width: 16px; height: 16px; border-radius: 3px; vertical-align: middle;}
+    .progress-row { margin: 20px 0 8px 0; display: flex; justify-content: space-around; font-size: 1.1em; color: #3b4c5a;}
+    #mainMap { width: 100%; height: 570px; margin: 0 auto; border-radius: 8px; box-shadow: 0 1px 5px rgba(50,90,150,0.08);}
+    .map-popup {
+      position: absolute;
+      z-index: 99;
+      background: #fff;
+      border-radius: 8px;
+      box-shadow: 0 2px 12px rgba(0,0,0,0.18);
+      border: 1px solid #ddd;
+      padding: 14px 12px 10px 12px;
+      min-width: 160px;
+      text-align: center;
+      animation: popup-in 0.18s;
+    }
+    @keyframes popup-in { from { opacity: 0; transform: scale(0.94);} to { opacity: 1; transform: scale(1);} }
+    .map-popup .popup-title { margin-bottom: 10px; font-size: 1.05em; color: #2574a9;}
+    .map-popup .popup-btn-group { display: flex; gap: 9px; justify-content: center;}
+    .map-popup .btn { min-width: 48px; font-size: 1em; }
+    .map-popup .close-btn {
+      position: absolute; right: 7px; top: 7px;
+      border: none; background: transparent; color: #b0b0b0; cursor: pointer; font-size: 1.1em; border-radius: 50%;
+      width: 22px; height: 22px; line-height: 16px; padding: 0;
+      transition: background 0.17s;
+    }
+    .map-popup .close-btn:hover { background: #eee;}
+    @media (max-width: 600px) {
+      .container { padding: 8px 4px 16px 4px; }
+      #mainMap { height: 350px; }
+      .progress-row { flex-direction: column; gap: 6px; }
+      .map-popup { min-width: 120px; padding: 10px 6px 8px 6px; }
+      .map-popup .popup-title { font-size: 0.97em;}
+      .map-popup .btn { font-size: 0.97em; min-width: 0;}
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>足迹地图仪表盘</h1>
+    <div class="progress-row">
+      <div>已到访省份：<span id="provinceProgress">0/0</span>（<span id="provincePercent">0%</span>）</div>
+    </div>
+    <div class="select-row">
+      <label for="provinceSelect">省份：</label>
+      <select id="provinceSelect">
+        <option value="">-- 未选中 --</option>
+      </select>
+      <span class="btn-group" id="stageBtns">
+        <button class="btn" data-stage="0">未到访</button>
+        <button class="btn" data-stage="1">到访</button>
+        <button class="btn" data-stage="2">短住</button>
+        <button class="btn" data-stage="3">长住</button>
+      </span>
+    </div>
+    <div class="legend">
+      <span><span class="legend-icon" style="background:#e0e0e0"></span>未到访</span>
+      <span><span class="legend-icon" style="background:#4fc3f7"></span>到访</span>
+      <span><span class="legend-icon" style="background:#ffc107"></span>短住</span>
+      <span><span class="legend-icon" style="background:#43a047"></span>长住</span>
+      <span><span class="legend-icon" style="background:#1976d2;border:2px solid #fff;box-shadow:0 0 0 2px #1976d2 inset"></span>当前选中</span>
+    </div>
+    <div id="mainMap" style="position: relative;"></div>
+  </div>
+  <script>
+    // ==== BEGIN: Paste your GeoJSON here ====
+    // Example:
+    const chinaGeoJson = { "type": "FeatureCollection", "features": [ ... ] };
+
+    // 省份短名称映射表
+    const provinceShortNames = {
+      "北京市": "北京",
+      "天津市": "天津",
+      "上海市": "上海",
+      "重庆市": "重庆",
+      "河北省": "河北",
+      "山西省": "山西",
+      "辽宁省": "辽宁",
+      "吉林省": "吉林",
+      "黑龙江省": "黑龙江",
+      "江苏省": "江苏",
+      "浙江省": "浙江",
+      "安徽省": "安徽",
+      "福建省": "福建",
+      "江西省": "江西",
+      "山东省": "山东",
+      "河南省": "河南",
+      "湖北省": "湖北",
+      "湖南省": "湖南",
+      "广东省": "广东",
+      "广西壮族自治区": "广西",
+      "海南省": "海南",
+      "四川省": "四川",
+      "贵州省": "贵州",
+      "云南省": "云南",
+      "西藏自治区": "西藏",
+      "陕西省": "陕西",
+      "甘肃省": "甘肃",
+      "青海省": "青海",
+      "宁夏回族自治区": "宁夏",
+      "新疆维吾尔自治区": "新疆",
+      "香港特别行政区": "香港",
+      "澳门特别行政区": "澳门",
+      "台湾省": "台湾",
+      "内蒙古自治区": "内蒙古"
+    };
+    // 省级行政区列表
+    const provinces = [
+      "北京市","天津市","上海市","重庆市",
+      "河北省","山西省","辽宁省","吉林省","黑龙江省","江苏省","浙江省","安徽省","福建省","江西省","山东省","河南省","湖北省","湖南省","广东省","广西壮族自治区","海南省",
+      "四川省","贵州省","云南省","内蒙古自治区","西藏自治区","陕西省","甘肃省","青海省","宁夏回族自治区","新疆维吾尔自治区",
+      "香港特别行政区","澳门特别行政区","台湾省"
+    ];
+    const stageColors = [
+      "#e0e0e0", // 未到访
+      "#4fc3f7", // 到访
+      "#ffc107", // 短住
+      "#43a047"  // 长住
+    ];
+    const stageNames = ["未到访", "到访", "短住", "长住"];
+    const selectPlaceholderValue = ""; // 未选中
+    const highlightColor = "#1976d2"; // 当前选中高亮色
+
+    const provinceSelect = document.getElementById("provinceSelect");
+
+    // 填充下拉选择
+    function fillProvinceSelect() {
+      provinceSelect.innerHTML = `<option value="">-- 未选中 --</option>`;
+      provinces.forEach(prov => {
+        const opt = document.createElement("option");
+        opt.value = prov;
+        opt.textContent = prov;
+        provinceSelect.appendChild(opt);
+      });
+    }
+    fillProvinceSelect();
+
+    // 省份状态数据
+    let visitData = {};
+    const LS_KEY = "travel_footprint_province";
+    function loadData() {
+      const d = localStorage.getItem(LS_KEY);
+      visitData = d ? JSON.parse(d) : {};
+    }
+    function saveData() {
+      localStorage.setItem(LS_KEY, JSON.stringify(visitData));
+    }
+
+    // 更新按钮选中/禁用状态
+    function updateStageBtns() {
+      const prov = provinceSelect.value;
+      document.querySelectorAll("#stageBtns .btn").forEach((btn, idx) => {
+        if (!prov) {
+          btn.classList.remove("selected");
+          btn.disabled = true;
+        } else {
+          const stage = visitData[prov] || 0;
+          btn.classList.toggle("selected", idx === stage);
+          btn.disabled = false;
+        }
+      });
+    }
+
+    // 按钮点击事件
+    document.querySelectorAll("#stageBtns .btn").forEach((btn, idx) => {
+      btn.onclick = function() {
+        const prov = provinceSelect.value;
+        if (!prov) return;
+        visitData[prov] = idx; // 更新状态
+        saveData();
+        updateStageBtns();
+        updateProgress();
+        renderMap();
+        highlightProvinceOnMap(prov);
+      };
+    });
+
+    // 下拉框变更
+    provinceSelect.onchange = function() {
+      updateStageBtns();
+      highlightProvinceOnMap(provinceSelect.value);
+    };
+
+    // 进度条
+    function updateProgress() {
+      let visited = 0;
+      let all = provinces.length;
+      provinces.forEach(prov => {
+        if ((visitData[prov] || 0) > 0) visited++;
+      });
+      document.getElementById("provinceProgress").textContent = `${visited}/${all}`;
+      document.getElementById("provincePercent").textContent = Math.round(visited * 100 / all) + "%";
+    }
+
+    function getShortName(fullName) {
+      return provinceShortNames[fullName] || fullName;
+    }
+
+    // 地图弹窗相关
+    let popupEl = null;
+    function removePopup() {
+      if (popupEl) {
+        popupEl.remove();
+        popupEl = null;
+      }
+    }
+    function createPopup(prov, x, y) {
+      removePopup();
+      popupEl = document.createElement("div");
+      popupEl.className = "map-popup";
+      const mapRect = document.getElementById("mainMap").getBoundingClientRect();
+      let left = x - mapRect.left, top = y - mapRect.top;
+      const minw = window.innerWidth <= 600 ? 120 : 160;
+      if (left + minw > mapRect.width) left = mapRect.width - minw - 10;
+      if (top + 120 > mapRect.height) top = top - 80;
+      if (left < 8) left = 8;
+      if (top < 8) top = 8;
+      popupEl.style.left = left + "px";
+      popupEl.style.top = top + "px";
+      popupEl.innerHTML =
+        `<button class="close-btn" title="关闭" tabindex="-1">&times;</button>
+        <div class="popup-title">选择 [${getShortName(prov)}] 状态</div>
+        <div class="popup-btn-group">
+          ${stageNames.map((name, idx) =>
+            `<button class="btn${(visitData[prov]||0)===idx?" selected":""}" style="background:${stageColors[idx]};color:${idx===0?"#666":"#fff"}" data-stage="${idx}">${name}</button>`
+          ).join("")}
+        </div>`;
+      document.getElementById("mainMap").appendChild(popupEl);
+      popupEl.querySelector(".close-btn").onclick = removePopup;
+      popupEl.querySelectorAll(".popup-btn-group .btn").forEach(btn => {
+        btn.onclick = function(e) {
+          visitData[prov] = parseInt(btn.getAttribute("data-stage"));
+          saveData();
+          updateProgress();
+          renderMap();
+          provinceSelect.value = prov;
+          updateStageBtns();
+          highlightProvinceOnMap(prov);
+          removePopup();
+        };
+      });
+      setTimeout(() => {
+        document.addEventListener("mousedown", onDocClickClose, { once: true });
+      }, 120);
+    }
+    function onDocClickClose(e) {
+      if (popupEl && !popupEl.contains(e.target)) removePopup();
+    }
+
+    // 地图渲染
+    let chart;
+    async function renderMap() {
+      if (!chart) chart = echarts.init(document.getElementById("mainMap"));
+      if (!echarts.getMap("china")) {
+        echarts.registerMap("china", chinaGeoJson);
+      }
+      let mapData = provinces.map(prov => ({
+        name: prov,
+        value: visitData[prov] || 0
+      }));
+      chart.setOption({
+        tooltip: {
+          show: true,
+          formatter: function (p) {
+            const prov = p.name;
+            const shortName = getShortName(prov);
+            const stage = visitData[prov] || 0;
+            return `<b>${shortName}</b><br>${stageNames[stage]}`;
+          }
+        },
+        visualMap: { show: false, min: 0, max: 3, inRange: { color: stageColors }},
+        series: [{
+          type: 'map',
+          map: 'china',
+          roam: true,
+          label: {
+            show: true,
+            fontSize: 12,
+            formatter: function(params) {
+              return getShortName(params.name);
+            }
+          },
+          data: mapData,
+          emphasis: {
+            label: { show: true, fontWeight: 'bold', fontSize: 14,
+              formatter: function(params) {
+                return getShortName(params.name);
+              }
+            },
+            itemStyle: {
+              areaColor: highlightColor,
+              shadowColor: highlightColor,
+              borderColor: '#fff',
+              borderWidth: 2
+            }
+          },
+          select: {
+            label: { show: true, fontWeight: 'bold', fontSize: 14,
+              formatter: function(params) {
+                return getShortName(params.name);
+              }
+            },
+            itemStyle: {
+              areaColor: highlightColor,
+              borderColor: '#fff',
+              borderWidth: 3
+            }
+          },
+          itemStyle: {
+            borderColor: '#fff',
+            borderWidth: 1
+          }
+        }]
+      });
+
+      // 地图点击事件
+      chart.off('click');
+      chart.on('click', function(params) {
+        if (!provinces.includes(params.name)) return;
+        // 选中/取消逻辑
+        if (provinceSelect.value === params.name) {
+          // 再次点击已选中省份，取消选中
+          provinceSelect.value = selectPlaceholderValue;
+          updateStageBtns();
+          highlightProvinceOnMap("");
+          removePopup();
+        } else {
+          provinceSelect.value = params.name;
+          updateStageBtns();
+          highlightProvinceOnMap(params.name);
+          let x = params.event.event.clientX, y = params.event.event.clientY;
+          createPopup(params.name, x, y);
+        }
+      });
+      highlightProvinceOnMap(provinceSelect.value);
+    }
+
+    // 高亮选中省份
+    function highlightProvinceOnMap(prov) {
+      if (!chart) return;
+      chart.dispatchAction({ type: 'downplay', seriesIndex: 0 });
+      chart.dispatchAction({ type: 'unselect', seriesIndex: 0 });
+      if (prov && provinces.includes(prov)) {
+        chart.dispatchAction({ type: 'select', seriesIndex: 0, name: prov });
+      }
+    }
+
+    // 初始化
+    function init() {
+      loadData();
+      updateProgress();
+      updateStageBtns();
+      renderMap();
+      highlightProvinceOnMap(provinceSelect.value);
+    }
+    window.onresize = function() { if (chart) chart.resize(); };
+    init();
+  </script>
+</body>
+</html>
